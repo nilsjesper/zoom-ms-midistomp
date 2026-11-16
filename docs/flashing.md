@@ -160,6 +160,20 @@ zoomms build-mac "firmware/MS-50G_v3.10_Mac_E/ZOOM MS-50G v3.10 Updater.app" \
   --patch patches/scroll.yaml --build-id ms50g-3.10 --out "build/out/MIDISTOMP V1.1 Updater.app"   # tag v1.1
 ```
 
+### Which model the pedal reports
+
+The pedal reports the model byte in BIN/133 (offset 0x2C00, flash `0x3FFC00`). Every
+v1.2 and later build keeps the MS-70CDR updater's `0x61`, so any pedal it is flashed on
+reports as an MS-70CDR. `--pedal ms50g`, `ms60b` or `ms70cdr` on `zoomms build`,
+`zoomms build-mac` or `scripts/midistomp_builder.py` (after the updater) writes that
+model's `sysex_model_id` from `models/` instead. The OS stays the MS-70CDR 2.10 one and
+only that byte changes.
+
+The OS uses the byte for SysEx only: the identity reply, and the model id that incoming
+SysEx must carry, so any tool has to address the pedal as the model you chose. MIDISTOMP
+updaters accept all four model bytes. Zoom's stock updaters accept only their own list,
+so a pedal on `0x58` needs Zoom's MS-50G updater, not the MS-70CDR one, for recovery.
+
 ### From a Windows build, without a Mac
 
 `--from-exe` takes the OS and BIN/133 from a Windows updater that has already

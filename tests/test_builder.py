@@ -60,3 +60,60 @@ def test_feature_dependencies_json_matches_release():
     assert d["order"] == builder.PATCHES == list(d["patches"])
     for p, v in d["patches"].items():   # every need is applied earlier
         assert all(d["order"].index(n) < d["order"].index(p) for n in v["needs"] + v["optional"]), p
+
+
+def stock_133():
+    d = bytearray(b"\xff" * 0x3000)
+    d[0x2C00] = 0x61
+    return d
+
+
+def test_set_pedal_model_changes_only_the_model_byte():
+    from zoomms import cli
+    for pedal, want in (("ms50g", 0x58), ("ms60b", 0x5F), ("ms70cdr", 0x61)):
+        d = stock_133()
+        cli.set_pedal_model(d, pedal)
+        expected = stock_133()
+        expected[0x2C00] = want
+        assert d == expected
+
+
+def test_set_pedal_model_refuses_a_part_without_a_model_byte():
+    import pytest
+    from zoomms import cli
+    with pytest.raises(ValueError):
+        cli.set_pedal_model(bytearray(b"\xff" * 0x3000), "ms50g")
+    with pytest.raises(ValueError):
+        cli.set_pedal_model(bytearray(16), "ms50g")
+
+
+def test_builder_refuses_an_unknown_pedal(tmp_path):
+    f = tmp_path / "x.exe"
+    f.write_bytes(b"not zoom")
+    assert builder.run([str(f), "--pedal", "ms99"]) == 1
+
+
+def test_builder_passes_the_pedal_on(monkeypatch):
+    seen = []
+    monkeypatch.setattr(builder.cli, "main", lambda argv: seen.extend(argv) or 0)
+    assert builder.build(Path("x.app"), Path("y.app"), True, pedal="ms50g") == 0
+    assert seen[seen.index("--pedal") + 1] == "ms50g"
+
+
+def test_no_pedal_keeps_the_release_build_as_it_was(monkeypatch):
+    seen = []
+    monkeypatch.setattr(builder.cli, "main", lambda argv: seen.extend(argv) or 0)
+    builder.build(Path("x.app"), Path("y.app"), True)
+    assert "--pedal" not in seen
+
+
+def test_build_mac_from_exe_refuses_pedal(tmp_path, capsys):
+    from zoomms import cli
+    res = tmp_path / "x.app" / "Contents" / "Resources"
+    res.mkdir(parents=True)
+    (res / "Main.bin").write_bytes(b"m")
+    (res / "Preset.bin").write_bytes(b"p")
+    argv = ["build-mac", str(tmp_path / "x.app"), "--from-exe", "a.exe", "--pedal", "ms50g",
+            "--out", str(tmp_path / "o.zip")]
+    assert cli.main(argv) == 1
+    assert "--pedal" in capsys.readouterr().err
