@@ -88,7 +88,22 @@ def build_stamp(patch_paths: list[str], given: list[str] = ()) -> dict:
     return stamp
 
 
-def _apply_patches(original: bytes, stock_133: bytes, patch_paths: list[str], build_id: str, stamp: list[str] = ()):
+MODEL_BYTE_133 = 0x2C00  # BIN/133 offset of the model byte, flash 0x3FFC00 (see flash.MODELS)
+
+
+def set_pedal_model(d133: bytearray, pedal: str) -> str:
+    """Make the pedal report as `pedal`. The OS uses this byte only for SysEx: its
+    identity reply, and the model id that incoming SysEx must carry."""
+    want = models.load_all()[pedal]["sysex_model_id"]
+    if len(d133) <= MODEL_BYTE_133 or d133[MODEL_BYTE_133] not in flash.MODELS:
+        raise ValueError(f"BIN/133 has no model byte at +0x{MODEL_BYTE_133:X}, nothing was set")
+    have = d133[MODEL_BYTE_133]
+    d133[MODEL_BYTE_133] = want
+    return f"pedal: reports as {pedal}, model byte 0x{have:02X} -> 0x{want:02X}"
+
+
+def _apply_patches(original: bytes, stock_133: bytes, patch_paths: list[str], build_id: str, stamp: list[str] = (),
+                   pedal: str = ""):
     """(new main OS, new BIN/133 or None if unchanged, parsed patched OS), or None on a patch error."""
     img = ais.parse(original)
     d133 = bytearray(stock_133)
@@ -102,6 +117,12 @@ def _apply_patches(original: bytes, stock_133: bytes, patch_paths: list[str], bu
             return None
         for line in lines:
             print(f"{patch['name']}: {line}")
+    if pedal:
+        try:
+            print(set_pedal_model(d133, pedal))
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return None
     new_os = ais.build_part(img, original)
     return new_os, (bytes(d133) if d133 != stock_133 else None), img
 
@@ -116,7 +137,7 @@ def cmd_build(args) -> int:
     p133 = next(p for p in found if p.resource_id == 133)
     original = parts.read_part(args.updater, os_part)
     stock_133 = parts.read_part(args.updater, p133)
-    patched = _apply_patches(original, stock_133, args.patch, args.build_id, args.stamp)
+    patched = _apply_patches(original, stock_133, args.patch, args.build_id, args.stamp, args.pedal)
     if patched is None:
         return 1
     new_os, new_133, img = patched
@@ -175,8 +196,8 @@ def cmd_build_mac(args) -> int:
         print(f"error: {out} already exists", file=sys.stderr)
         return 1
     if args.from_exe:
-        if args.patch:
-            print("error: --from-exe takes the OS as built; don't pass --patch", file=sys.stderr)
+        if args.patch or args.pedal:
+            print("error: --from-exe takes the OS as built; don't pass --patch or --pedal", file=sys.stderr)
             return 1
         try:
             new_os, new_133 = _parts_from_exe(args.from_exe, res)
@@ -186,7 +207,7 @@ def cmd_build_mac(args) -> int:
             return 1
         new_133 = None if new_133 == stock_133 else new_133
     else:
-        patched = _apply_patches(original, stock_133, args.patch, args.build_id, args.stamp)
+        patched = _apply_patches(original, stock_133, args.patch, args.build_id, args.stamp, args.pedal)
         if patched is None:
             return 1
         new_os, new_133, img = patched
@@ -283,6 +304,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("build", help="build a modified updater from a stock one plus patch files")
     p.add_argument("updater", help="stock official updater .exe")
     p.add_argument("--patch", action="append", default=[], help="patch file; omit to rebuild the stock OS")
+    p.add_argument("--pedal", choices=sorted(models.load_all()), default="",
+                   help="set the model byte so the pedal reports as this model; omit to keep the updater's own")
     p.add_argument("--build-id", default="", help="e.g. ms50g-3.10, used by address-specific patches")
     p.add_argument("--stamp", action="append", default=[], metavar="KEY=TEXT",
                    help="stamp field text (version, commit, date, label; defaults: version-X.Y patch, git, today, DEV)")
@@ -293,6 +316,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("build-mac", help="build a modified Mac updater app from Zoom's Mac one plus patch files")
     p.add_argument("app", help="stock official updater .app")
     p.add_argument("--patch", action="append", default=[], help="patch file; omit to rebuild the stock OS")
+    p.add_argument("--pedal", choices=sorted(models.load_all()), default="",
+                   help="set the model byte so the pedal reports as this model; omit to keep the updater's own")
     p.add_argument("--build-id", default="", help="e.g. ms50g-3.10, used by address-specific patches")
     p.add_argument("--stamp", action="append", default=[], metavar="KEY=TEXT",
                    help="stamp field text (version, commit, date, label; defaults: version-X.Y patch, git, today, DEV)")

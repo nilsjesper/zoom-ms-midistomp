@@ -42,7 +42,7 @@ def identity_tag(name: str = NAME) -> str:
     return "M" + digits
 
 
-def build(updater: Path, out: Path, mac: bool = False) -> int:
+def build(updater: Path, out: Path, mac: bool = False, pedal: str = "") -> int:
     argv = ["build-mac" if mac else "build", str(updater), "--build-id", "ms70cdr-2.10", "--out", str(out),
             "--stamp", f"version={NAME.split()[-1]}"]   # SYSTEM page shows the full V2.0.3; boot and menu stay V2.0
     with tempfile.TemporaryDirectory() as tmp:
@@ -55,6 +55,8 @@ def build(updater: Path, out: Path, mac: bool = False) -> int:
                 path = Path(tmp) / path.name
                 path.write_text(text, encoding="utf-8")
             argv += ["--patch", str(path)]
+        if pedal:
+            argv += ["--pedal", pedal]
         return cli.main(argv)
 
 
@@ -81,11 +83,19 @@ def ask_path() -> list[str]:
 def run(args: list[str]) -> int:
     if not args and getattr(sys, "frozen", False) and sys.platform == "darwin":
         args = ask_path()
+    pedal = ""
+    if len(args) == 3 and args[1] == "--pedal":
+        pedal, args = args[2], args[:1]
+        if pedal not in models.load_all(ROOT / "models"):
+            print(f"Unknown pedal {pedal}: use ms50g, ms60b or ms70cdr. Nothing was written.")
+            return 1
     if len(args) != 1:
         print(f"{NAME} builder\n\nDrag Zoom's official MS-70CDR v2.10 updater "
               "(ZOOM MS-70CDR v2.10 Updater.exe) onto this program.\n"
               "On a Mac, open this program and drag Zoom's Mac updater "
-              "(ZOOM MS-70CDR v2.10 Updater.app) into its window instead.")
+              "(ZOOM MS-70CDR v2.10 Updater.app) into its window instead.\n"
+              "From a command line, add --pedal ms50g, ms60b or ms70cdr after the updater to set "
+              "the model the pedal reports.")
         return 1
     updater = Path(args[0].rstrip("/"))
     mac = updater.suffix == ".app"
@@ -105,7 +115,7 @@ def run(args: list[str]) -> int:
         print(f"{out} already exists; move it away first. Nothing was written.")
         return 1
     try:
-        failed = build(updater, out, mac)
+        failed = build(updater, out, mac, pedal)
     except ValueError as e:
         print(f"error: {e}")
         failed = 1
